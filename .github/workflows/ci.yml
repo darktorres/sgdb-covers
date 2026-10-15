@@ -118,12 +118,23 @@ jobs:
         with:
           subject-path: dist/sgdb-covers.exe
       - name: Create the release
+        shell: bash  # unlike the default shell, this one fails a step when any command in a pipe fails
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cd dist
           sha256sum sgdb-covers.exe > sgdb-covers.exe.sha256
+          # The notes are the annotated tag's message, without its signature if it's signed. (gh's
+          # --notes-from-tag only reads a local checkout.) A lightweight tag gets notes from GitHub.
+          tag=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$GITHUB_REF_NAME" --jq '.object.type + " " + .object.sha')
+          if [[ "$tag" == "tag "* ]]; then
+            gh api "repos/$GITHUB_REPOSITORY/git/tags/${tag#tag }" --jq .message \
+              | sed '/^-----BEGIN [A-Z ]*SIGNATURE-----$/,$d' > "$RUNNER_TEMP/notes.md"
+            notes=(--notes-file "$RUNNER_TEMP/notes.md")
+          else
+            notes=(--generate-notes)
+          fi
           prerelease=()
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease=(--prerelease); fi  # e.g. v1.2.0-rc1
-          gh release create "$GITHUB_REF_NAME" sgdb-covers.exe sgdb-covers.exe.sha256 "${prerelease[@]}" \
-            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes-from-tag --verify-tag
+          gh release create "$GITHUB_REF_NAME" sgdb-covers.exe sgdb-covers.exe.sha256 "${notes[@]}" "${prerelease[@]}" \
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --verify-tag

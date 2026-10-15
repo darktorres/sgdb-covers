@@ -1,5 +1,9 @@
 """Fill in missing Steam vertical library covers (600x900) from SteamGridDB."""
 
+# The one place the version lives: --version, the User-Agent and the .exe's file properties all use
+# it, and CI only publishes a release tag that matches it (v1.0.0 for "1.0.0").
+__version__ = "1.0.0"
+
 import sys
 
 # Checked before the other imports, some of which older versions don't have.
@@ -50,7 +54,7 @@ CDN_URLS = [
     "https://shared.steamstatic.com/store_item_assets/steam/apps/{}/library_600x900.jpg",
     "https://steamcdn-a.akamaihd.net/steam/apps/{}/library_600x900.jpg",
 ]
-USER_AGENT = "sgdb-covers/1.0"
+USER_AGENT = f"sgdb-covers/{__version__}"
 NOT_FOUND_TTL = 30 * 24 * 3600
 MAX_ERRORS_IN_A_ROW = 10
 GRID_EXTS = (".png", ".jpg", ".jpeg", ".webp")
@@ -1100,6 +1104,7 @@ def parse_args(argv: list[str] | None = None) -> Args:
                          "to see the list first)")
     ap.add_argument("-v", "--verbose", action="store_true",
                     help="also list each game left without a cover and why, and each adopted cover")
+    ap.add_argument("--version", action="version", version=f"sgdb-covers {__version__}")
     return ap.parse_args(argv, namespace=Args())
 
 

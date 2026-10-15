@@ -44,6 +44,7 @@ The first time there are covers to download, it prints the [API key page](https:
 | `--workers N` | Number of parallel requests (default 6) |
 | `--adopt-existing` | Start tracking existing covers for games without official art, so they're removed once official art appears (run once; add `--dry-run` to see the list first) |
 | `-v` | Also list each game left without a cover and why (no art on SteamGridDB now or on an earlier run, or the Steam store check failed), games found to have official art during the check, and each adopted cover |
+| `--version` | Print the version |
 
 The Steam folder is found automatically: from the registry on Windows, and in the usual places on Linux (`~/.steam/steam`, `~/.local/share/Steam`, Flatpak, Snap) and macOS (`~/Library/Application Support/Steam`). It's been used against a real Steam library on Windows; on Linux and macOS, only the automated tests have run it.
 
@@ -87,12 +88,19 @@ The `.in` files in `requirements/` list the tools; the pinned `.txt` files are g
 - the type checkers;
 - then a build of the .exe, with Python 3.14 and the pinned PyInstaller.
 
-The .exe is tested and then attached to the run, where it can be downloaded. Pushing a version tag also publishes a release:
+The .exe is tested and then attached to the run, where it can be downloaded.
+
+To publish a release:
+1. Set `__version__` at the top of `sgdb_covers.py`, then commit and push. That one value is what `--version`, the User-Agent and the .exe's Properties > Details all show.
+2. Write the release notes (Markdown) to a file, say `notes.md`.
+3. Create an annotated tag whose message is those notes, and push it:
 
 ```
-git tag v1.0.0
+git tag -a v1.0.0 --cleanup=verbatim -F notes.md
 git push origin v1.0.0
 ```
+
+`--cleanup=verbatim` keeps Markdown headings, which git would otherwise strip as comments. CI only publishes a tag that matches `__version__`: `v1.0.0` for `"1.0.0"`.
 
 The release holds the .exe and its SHA-256 checksum. For a public repository it also gets a signed build provenance, which proves the .exe was built by this workflow from that commit: `gh attestation verify sgdb-covers.exe --repo <owner>/<repo>`. A tag with a hyphen, such as `v1.1.0-rc1`, is marked as a pre-release.
 

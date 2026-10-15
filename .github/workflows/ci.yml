@@ -1,5 +1,6 @@
 # Tests and type-checks every push and pull request, then builds the standalone sgdb-covers.exe,
-# tests it and attaches it to the run. Pushing a version tag (v1.2.3) also publishes it as a release.
+# tests it and attaches it to the run. Pushing a version tag also publishes it as a release: the tag
+# must match __version__ in sgdb_covers.py (v1.2.3 for "1.2.3"), and its message becomes the notes.
 #
 # Actions are pinned to full commit SHAs (a tag can be moved; a commit can't), and the Python tools
 # to exact versions with hashes. Dependabot keeps both up to date: see .github/dependabot.yml.
@@ -73,6 +74,15 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.14"  # mature enough for a binary that's handed out; tests cover 3.15
+      - name: Check that the tag matches the script's version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version=$(python sgdb_covers.py --version)
+          if [[ "$version" != "sgdb-covers ${GITHUB_REF_NAME#v}" ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match the script's version ($version)"
+            exit 1
+          fi
       - run: python -m pip install --require-hashes -r requirements/build.txt
       - run: pyinstaller --clean --noconfirm sgdb-covers.spec
       - name: Test the .exe
@@ -116,4 +126,4 @@ jobs:
           prerelease=()
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease=(--prerelease); fi  # e.g. v1.2.0-rc1
           gh release create "$GITHUB_REF_NAME" sgdb-covers.exe sgdb-covers.exe.sha256 "${prerelease[@]}" \
-            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes-from-tag --verify-tag

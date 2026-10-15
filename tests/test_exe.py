@@ -3,14 +3,40 @@ Skipped otherwise; the script itself is covered by test_sgdb_covers.py."""
 
 import os
 import shutil
+import struct
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+import sgdb_covers as sc
 from tests.steam_fixture import app, make_steam
 
 EXE = os.environ.get("SGDB_COVERS_EXE", "")
+
+
+def version_resource(exe: Path, field: str) -> str:
+    """A string from the .exe's version resource, which its Properties > Details tab shows."""
+    if sys.platform != "win32":
+        raise unittest.SkipTest("version resources are a Windows thing")
+    import ctypes
+    from ctypes import wintypes
+    api = ctypes.windll.version
+    size = api.GetFileVersionInfoSizeW(str(exe), None)
+    data = ctypes.create_string_buffer(size)
+    if not size or not api.GetFileVersionInfoW(str(exe), 0, size, data):
+        raise AssertionError("the .exe has no version resource")
+    pointer, length = ctypes.c_void_p(), wintypes.UINT()
+    translation = r"\VarFileInfo\Translation"
+    if not api.VerQueryValueW(data, translation, ctypes.byref(pointer), ctypes.byref(length)) or pointer.value is None:
+        raise AssertionError("the .exe's version resource has no language")
+    language, codepage = struct.unpack("<HH", ctypes.string_at(pointer.value, 4))
+    query = rf"\StringFileInfo\{language:04x}{codepage:04x}\{field}"
+    text, text_length = ctypes.c_void_p(), wintypes.UINT()
+    if not api.VerQueryValueW(data, query, ctypes.byref(text), ctypes.byref(text_length)) or text.value is None:
+        raise AssertionError(f"the .exe's version resource has no {field}")
+    return ctypes.wstring_at(text.value, text_length.value - 1)  # the length counts the closing NUL
 
 
 @unittest.skipUnless(EXE, "set SGDB_COVERS_EXE to a built sgdb-covers.exe to test it")
@@ -33,6 +59,12 @@ class TestExe(unittest.TestCase):
         result = self.run_exe("--help")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("SteamGridDB", result.stdout)
+
+    def test_version(self) -> None:
+        result = self.run_exe("--version")
+        self.assertEqual((result.returncode, result.stdout.strip()), (0, f"sgdb-covers {sc.__version__}"))
+        for field in ("FileVersion", "ProductVersion"):
+            self.assertEqual(version_resource(self.exe, field), sc.__version__)
 
     def test_a_run_keeps_its_files_next_to_the_exe(self) -> None:
         steam = self.tmp / "Steam"

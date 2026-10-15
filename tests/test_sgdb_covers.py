@@ -579,6 +579,21 @@ class TestSteamFolders(Case):
         self.assertEqual(sc.existing_custom(self.tmp, "10", listing), [])
 
 
+# ---------------------------------------------------------------- version
+
+class TestVersion(unittest.TestCase):
+    def test_version_flag(self) -> None:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as stop:
+            sc.main(["--version"])
+        self.assertEqual(stop.exception.code, 0)
+        self.assertEqual(out.getvalue(), f"sgdb-covers {sc.__version__}\n")
+
+    def test_the_version_has_the_form_release_tags_and_the_exe_use(self) -> None:
+        self.assertRegex(sc.__version__, r"^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$")  # see sgdb-covers.spec
+        self.assertEqual(sc.USER_AGENT, f"sgdb-covers/{sc.__version__}")
+
+
 # ---------------------------------------------------------------- running as an .exe
 
 class TestAsExe(unittest.TestCase):

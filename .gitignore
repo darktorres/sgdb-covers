@@ -1,3 +1,4 @@
 .env
-state.json
+state*.json
+sgdb-covers.lock
 __pycache__/

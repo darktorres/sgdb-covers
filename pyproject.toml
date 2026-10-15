@@ -1,0 +1,11 @@
+# Settings for the type checkers. The script itself needs no installation: see README.md.
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+files = ["sgdb_covers.py", "tests"]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.11"
+include = ["sgdb_covers.py", "tests"]

@@ -18,12 +18,12 @@ import urllib.request
 from collections.abc import Callable, Iterable, Mapping
 from http.client import HTTPMessage
 from pathlib import Path
-from typing import cast
 from unittest import mock
 
 os.environ["NO_COLOR"] = "1"  # before the import, which decides on colors
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import sgdb_covers as sc  # noqa: E402
+from tests.steam_fixture import app, build_appinfo, make_steam  # noqa: E402
 
 REAL_HTTP = sc.http  # every test replaces sc.http; the certificate test needs the real one
 PNG = b"\x89PNG\r\n\x1a\n" + bytes(32)
@@ -68,50 +68,6 @@ class FakeHttp:
         raise AssertionError(f"unexpected request: {url}")
 
 
-def encode_map(entries: Mapping[str, object], key: Callable[[str], bytes]) -> bytes:
-    """Binary KeyValues holding maps, strings and ints; `key` writes each entry's name."""
-    out = b""
-    for name, value in entries.items():
-        if isinstance(value, Mapping):
-            out += b"\x00" + key(name) + encode_map(cast(Mapping[str, object], value), key)
-        elif isinstance(value, str):
-            out += b"\x01" + key(name) + value.encode() + b"\x00"
-        elif isinstance(value, int):
-            out += b"\x02" + key(name) + struct.pack("<i", value)
-    return out + b"\x08"
-
-
-def build_appinfo(apps: Mapping[int, Mapping[str, object]], version: int = 29, extra: bytes = b"") -> bytes:
-    """An appinfo.vdf in format v29 (names in a string table at the end) or v28 (names inline).
-    `extra` is raw bytes inserted after the apps, e.g. a damaged entry."""
-    strings: list[str] = []
-
-    def key(name: str) -> bytes:
-        if version == 28:
-            return name.encode() + b"\x00"
-        if name not in strings:
-            strings.append(name)
-        return struct.pack("<I", strings.index(name))
-
-    body = b""
-    for appid, info in apps.items():
-        entry = bytes(60) + encode_map({"appinfo": info}, key)  # 60: the entry header (state, sha1s...)
-        body += struct.pack("<II", appid, len(entry)) + entry
-    body += extra + struct.pack("<I", 0)
-    if version == 28:
-        return struct.pack("<II", 0x07564428, 1) + body
-    table = struct.pack("<I", len(strings)) + b"".join(s.encode() + b"\x00" for s in strings)
-    return struct.pack("<IIq", 0x07564429, 1, 16 + len(body)) + body + table
-
-
-def app(name: str, kind: str = "Game", art: bool = False) -> dict[str, object]:
-    """An appinfo.vdf entry: real vertical art if `art`, otherwise only Steam's placeholder."""
-    common: dict[str, object] = {"type": kind, "name": name}
-    if art:
-        common["library_assets"] = {"library_capsule": "en"}
-    return {"common": common}
-
-
 class Case(unittest.TestCase):
     """A test with its own folder for state.json, .env and the run lock, and no real network."""
 
@@ -142,19 +98,10 @@ class Case(unittest.TestCase):
         return fake
 
     def make_steam(self, apps: Mapping[int, Mapping[str, object]], covers: Mapping[str, bytes] | None = None) -> Path:
-        """A Steam folder with `apps` in its library cache and appinfo.vdf, and one account (1) whose
-        grid folder holds `covers`. Returns the grid folder."""
+        """A Steam folder with `apps`, and one account (1) whose grid folder holds `covers`. Returns the
+        grid folder."""
         self.steam = self.tmp / "Steam"
-        cache = self.steam / "appcache" / "librarycache"
-        cache.mkdir(parents=True)
-        for appid in apps:
-            (cache / str(appid)).mkdir()
-        (self.steam / "appcache" / "appinfo.vdf").write_bytes(build_appinfo(apps))
-        grid_dir = self.steam / "userdata" / "1" / "config" / "grid"
-        grid_dir.mkdir(parents=True)
-        for name, data in (covers or {}).items():
-            (grid_dir / name).write_bytes(data)
-        return grid_dir
+        return make_steam(self.steam, apps, covers)
 
     def save_key(self) -> None:
         sc.ENV_FILE.write_text(f"SGDB_API_KEY={KEY}\n", encoding="utf-8")
@@ -630,6 +577,59 @@ class TestSteamFolders(Case):
             listing = sc.list_folder(self.tmp)
         self.assertNotIn("10p.png", listing)  # Steam on Linux wouldn't use 10P.PNG either
         self.assertEqual(sc.existing_custom(self.tmp, "10", listing), [])
+
+
+# ---------------------------------------------------------------- running as an .exe
+
+class TestAsExe(unittest.TestCase):
+    def test_files_live_next_to_the_exe(self) -> None:
+        exe = Path(tempfile.gettempdir(), "tools", "sgdb-covers.exe")
+        with mock.patch.object(sys, "frozen", True, create=True), mock.patch.object(sys, "executable", str(exe)):
+            self.assertEqual(sc.app_folder(), exe.resolve().parent)
+        self.assertEqual(sc.app_folder(), Path(sc.__file__).resolve().parent)  # the script: next to it
+
+    def owns_window(self, *, frozen: bool = True, tty: bool = True, unpacked: str = "_MEI12345",
+                    processes: int = 2) -> bool:
+        stdin = mock.Mock()
+        stdin.isatty.return_value = tty
+        with mock.patch.object(sys, "frozen", frozen, create=True),                 mock.patch.object(sys, "_MEIPASS", str(Path(tempfile.gettempdir(), unpacked)), create=True),                 mock.patch.object(sys, "stdin", stdin), mock.patch.object(sc, "console_process_count", return_value=processes):
+            return sc.owns_console_window()
+
+    def test_a_double_clicked_exe_has_its_own_window(self) -> None:
+        self.assertTrue(self.owns_window(processes=2))  # one-file build: PyInstaller's launcher and the program
+        self.assertTrue(self.owns_window(unpacked="_internal", processes=1))  # one-folder build
+
+    def test_otherwise_the_window_isnt_its_own(self) -> None:
+        self.assertFalse(self.owns_window(processes=3))  # a terminal shares it
+        self.assertFalse(self.owns_window(unpacked="_internal", processes=2))
+        self.assertFalse(self.owns_window(processes=0))  # no console at all
+        self.assertFalse(self.owns_window(frozen=False))  # the .py script
+        self.assertFalse(self.owns_window(tty=False))  # input redirected: nobody there to press Enter
+
+    def run_cli(self, main: Callable[[], int], *, own_window: bool,
+                pause: mock.MagicMock) -> tuple[int | str | None, str]:
+        err = io.StringIO()
+        with mock.patch.object(sc, "main", side_effect=main),                 mock.patch.object(sc, "owns_console_window", return_value=own_window),                 mock.patch("builtins.input", pause), contextlib.redirect_stderr(err), self.assertRaises(SystemExit) as stop:
+            sc.cli()
+        return stop.exception.code, err.getvalue()
+
+    def test_waits_for_enter_only_in_its_own_window(self) -> None:
+        pause = mock.MagicMock()
+        self.assertEqual(self.run_cli(lambda: 0, own_window=True, pause=pause), (0, ""))
+        pause.assert_called_once()
+        pause = mock.MagicMock()
+        self.assertEqual(self.run_cli(lambda: 1, own_window=False, pause=pause), (1, ""))
+        pause.assert_not_called()
+
+    def test_an_error_is_shown_before_waiting(self) -> None:
+        def fail() -> int:
+            sys.exit("Steam library cache not found")
+
+        pause = mock.MagicMock(side_effect=KeyboardInterrupt)  # Ctrl+C instead of Enter: still exits
+        code, err = self.run_cli(fail, own_window=True, pause=pause)
+        self.assertEqual(code, 1)
+        self.assertIn("Steam library cache not found", err)
+        pause.assert_called_once()
 
 
 # ---------------------------------------------------------------- writing and removing covers

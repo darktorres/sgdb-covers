@@ -1,0 +1,119 @@
+# Tests and type-checks every push and pull request, then builds the standalone sgdb-covers.exe,
+# tests it and attaches it to the run. Pushing a version tag (v1.2.3) also publishes it as a release.
+#
+# Actions are pinned to full commit SHAs (a tag can be moved; a commit can't), and the Python tools
+# to exact versions with hashes. Dependabot keeps both up to date: see .github/dependabot.yml.
+# Nothing is cached between runs, so a poisoned cache can't end up in a published .exe.
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A newer push makes an unfinished run for the same branch pointless; a release must always finish.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+        python: ["3.11", "3.15"]  # the oldest supported and the newest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m unittest -v
+
+  typecheck:
+    name: Type checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.14"
+      - run: python -m pip install --require-hashes -r requirements/dev.txt
+      - name: mypy (strict, for each platform and the newest Python)
+        run: |
+          for platform in win32 linux darwin; do mypy --platform "$platform"; done
+          mypy --python-version 3.15
+      - name: pyright (strict, for each platform)
+        run: |
+          for platform in Windows Linux Darwin; do pyright --pythonplatform "$platform"; done
+
+  build:
+    name: Build sgdb-covers.exe
+    needs: [test, typecheck]
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.14"  # mature enough for a binary that's handed out; tests cover 3.15
+      - run: python -m pip install --require-hashes -r requirements/build.txt
+      - run: pyinstaller --clean --noconfirm sgdb-covers.spec
+      - name: Test the .exe
+        run: python -m unittest -v tests.test_exe
+        env:
+          SGDB_COVERS_EXE: dist/sgdb-covers.exe
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          path: dist/sgdb-covers.exe
+          archive: false  # the .exe itself, not a zip around it
+          if-no-files-found: error
+
+  release:
+    name: Publish the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write  # to create the release
+      id-token: write  # to sign the build provenance
+      attestations: write  # to store it
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: sgdb-covers.exe
+          path: dist
+      # Lets anyone check that the .exe was built here, from this commit:
+      #   gh attestation verify sgdb-covers.exe --repo <owner>/<repo>
+      - name: Attest the build provenance
+        if: ${{ !github.event.repository.private }}  # free for public repositories only
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: dist/sgdb-covers.exe
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          sha256sum sgdb-covers.exe > sgdb-covers.exe.sha256
+          prerelease=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease=(--prerelease); fi  # e.g. v1.2.0-rc1
+          gh release create "$GITHUB_REF_NAME" sgdb-covers.exe sgdb-covers.exe.sha256 "${prerelease[@]}" \
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes --verify-tag

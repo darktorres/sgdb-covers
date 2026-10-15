@@ -2,3 +2,7 @@
 state*.json
 sgdb-covers.lock
 __pycache__/
+# PyInstaller output and local virtual environments
+build/
+dist/
+.venv/

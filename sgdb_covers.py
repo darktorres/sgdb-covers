@@ -22,7 +22,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import Counter
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Generator, Iterable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -31,7 +31,14 @@ from pathlib import Path
 from types import FrameType
 from typing import IO, Literal, TypedDict, TypeGuard, TypeVar, cast
 
-HERE = Path(__file__).resolve().parent
+
+def app_folder() -> Path:
+    """Where .env, state.json and the lock live: next to the script, or next to the .exe when built
+    with PyInstaller (whose __file__ is in a temporary folder that's deleted when the program ends)."""
+    return Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve().parent
+
+
+HERE = app_folder()
 ENV_FILE = HERE / ".env"
 STATE_FILE = HERE / "state.json"
 LOCK_FILE = HERE / "sgdb-covers.lock"
@@ -825,7 +832,7 @@ def unlock_file(f: IO[bytes]) -> None:
 
 
 @contextmanager
-def run_lock(dry_run: bool) -> Iterator[None]:
+def run_lock(dry_run: bool) -> Generator[None]:
     """Keep a second run from starting while this one works. Dry runs write nothing, so they don't lock."""
     if dry_run:
         yield
@@ -872,7 +879,7 @@ class WriteGuard:
         self._stopped = False
 
     @contextmanager
-    def writing(self) -> Iterator[None]:
+    def writing(self) -> Generator[None]:
         with self._lock:
             if self._stopped:
                 raise RuntimeError("stopped before writing")
@@ -1378,11 +1385,50 @@ def main(argv: list[str] | None = None) -> int:
         return run(args, folders)
 
 
-if __name__ == "__main__":
+def console_process_count() -> int:
+    """How many processes share this program's console window (0 if it has none)."""
+    if sys.platform != "win32":
+        return 0
+    import ctypes
+    pids = (ctypes.c_uint32 * 16)()
+    return int(ctypes.windll.kernel32.GetConsoleProcessList(pids, len(pids)))
+
+
+def owns_console_window() -> bool:
+    """Whether this is the .exe started from Explorer, whose console window closes the moment the
+    program ends, before anyone can read it. Started from a terminal, the terminal shares the window."""
+    if not getattr(sys, "frozen", False) or not sys.stdin.isatty():
+        return False
+    # A one-file build runs as two processes (PyInstaller's launcher, which unpacks the program into
+    # a _MEI* temporary folder, and the program itself); a one-folder build as one. More means a
+    # terminal is there too.
+    one_file = Path(getattr(sys, "_MEIPASS", "")).name.startswith("_MEI")
+    return 0 < console_process_count() <= (2 if one_file else 1)
+
+
+def cli() -> None:
+    """Run as a program: main(), then exit, first letting the output be read if this is the .exe in a
+    console window of its own."""
     try:
-        sys.exit(main())
+        try:
+            code: int | str | None = main()
+        except SystemExit as stop:
+            code = stop.code
+        if isinstance(code, str):
+            print(code, file=sys.stderr)  # what Python prints for sys.exit("message")
+            code = 1
+        if owns_console_window():
+            try:
+                input("\nPress Enter to close this window.")
+            except (EOFError, KeyboardInterrupt):
+                pass
+        sys.exit(code)
     except KeyboardInterrupt:
         # Ctrl+C before any cover is being written (scanning, store check, key prompt). Leave at once:
         # requests still in flight run on worker threads, which a normal exit would wait for.
         print(yellow("\nInterrupted."), flush=True)
         os._exit(130)
+
+
+if __name__ == "__main__":
+    cli()

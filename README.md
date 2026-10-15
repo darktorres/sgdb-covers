@@ -21,13 +21,17 @@ The script only touches `<appid>p.*` files: it adds and replaces them, and remov
 
 ## Usage
 
-Requires Python 3.11+ and nothing else.
+On Windows, the simplest way is `sgdb-covers.exe`, which needs nothing installed: download it from this repository's Releases page, put it in any folder and run it. It keeps its `.env` and `state.json` next to itself. When it's double-clicked, it waits for Enter before closing its window, so the summary can be read. Windows may warn that the publisher is unknown, because the .exe isn't code-signed.
+
+The script itself runs anywhere with Python 3.11+ and nothing else:
 
 ```
 python sgdb_covers.py
 ```
 
-The first time there are covers to download, the script prints the [API key page](https://www.steamgriddb.com/profile/preferences/api) and asks you to paste your key. The key is saved to `.env` next to the script.
+Both take the same flags (`sgdb-covers.exe --dry-run`, `python sgdb_covers.py --dry-run`).
+
+The first time there are covers to download, it prints the [API key page](https://www.steamgriddb.com/profile/preferences/api) and asks you to paste your key. The key is saved to `.env` next to the script (or the .exe).
 
 | Flag | |
 |---|---|
@@ -41,7 +45,7 @@ The first time there are covers to download, the script prints the [API key page
 | `--adopt-existing` | Start tracking existing covers for games without official art, so they're removed once official art appears (run once; add `--dry-run` to see the list first) |
 | `-v` | Also list each game left without a cover and why (no art on SteamGridDB now or on an earlier run, or the Steam store check failed), games found to have official art during the check, and each adopted cover |
 
-The Steam folder is found automatically: from the registry on Windows, and in the usual places on Linux (`~/.steam/steam`, `~/.local/share/Steam`, Flatpak, Snap) and macOS (`~/Library/Application Support/Steam`). The script is tested on Windows.
+The Steam folder is found automatically: from the registry on Windows, and in the usual places on Linux (`~/.steam/steam`, `~/.local/share/Steam`, Flatpak, Snap) and macOS (`~/Library/Application Support/Steam`). It's been used against a real Steam library on Windows; on Linux and macOS, only the automated tests have run it.
 
 Output is colored in a terminal. Set `NO_COLOR=1` to turn colors off; they're also off automatically when output is redirected to a file.
 
@@ -57,4 +61,39 @@ The tests use only the standard library and need no network:
 python -m unittest
 ```
 
-`pyproject.toml` holds the strict settings for `mypy` and `pyright`; run either from this folder. To also run the tests on Python 3.11, the oldest supported version: `uv run --no-project --python 3.11 python -m unittest`.
+To also run them on Python 3.11, the oldest supported version: `uv run --no-project --python 3.11 python -m unittest`.
+
+`pyproject.toml` holds the strict settings for `mypy` and `pyright`; run either from this folder. The exact versions CI uses are pinned, with hashes, in `requirements/dev.txt`:
+
+```
+pip install --require-hashes -r requirements/dev.txt
+```
+
+To build the .exe (on Windows):
+
+```
+pip install --require-hashes -r requirements/build.txt
+pyinstaller --clean --noconfirm sgdb-covers.spec
+```
+
+It lands in `dist\`. To test it, point `SGDB_COVERS_EXE` at it and run `python -m unittest tests.test_exe`. These tests are skipped when the variable isn't set.
+
+The `.in` files in `requirements/` list the tools; the pinned `.txt` files are generated from them with the `uv` command at the top of each `.in` file.
+
+### CI
+
+`.github/workflows/ci.yml` runs on every push and pull request:
+- the tests on Windows, Linux and macOS, with Python 3.11 and 3.15;
+- the type checkers;
+- then a build of the .exe, with Python 3.14 and the pinned PyInstaller.
+
+The .exe is tested and then attached to the run, where it can be downloaded. Pushing a version tag also publishes a release:
+
+```
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The release holds the .exe and its SHA-256 checksum. For a public repository it also gets a signed build provenance, which proves the .exe was built by this workflow from that commit: `gh attestation verify sgdb-covers.exe --repo <owner>/<repo>`. A tag with a hyphen, such as `v1.1.0-rc1`, is marked as a pre-release.
+
+Dependabot (`.github/dependabot.yml`) keeps the pinned actions and tools up to date with weekly pull requests, which CI tests like any other change.

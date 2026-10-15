@@ -1,0 +1,4 @@
+# The type checkers. Pinned with hashes in dev.txt; regenerate with:
+#   uv pip compile requirements/dev.in --generate-hashes --universal --python-version 3.11 -o requirements/dev.txt
+mypy
+pyright[nodejs]

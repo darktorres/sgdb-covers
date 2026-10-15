@@ -1,0 +1,25 @@
+# Keeps the pinned GitHub Actions and Python tools up to date: Dependabot opens a pull request each
+# week when there's something new, and CI tests it before anything is merged. New releases wait a
+# week first, so a compromised one is likely caught and pulled before it gets here.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /requirements
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      python-tools:
+        patterns: ["*"]

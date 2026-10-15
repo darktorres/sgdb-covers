@@ -3,9 +3,9 @@
 [tool.mypy]
 strict = true
 python_version = "3.11"
-files = ["sgdb_covers.py", "tests"]
+files = ["sgdb_covers.py", "tests", "tools"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
 pythonVersion = "3.11"
-include = ["sgdb_covers.py", "tests"]
+include = ["sgdb_covers.py", "tests", "tools"]

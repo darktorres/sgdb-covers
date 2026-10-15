@@ -102,6 +102,10 @@ git push origin v1.0.0
 
 `--cleanup=verbatim` keeps Markdown headings, which git would otherwise strip as comments. CI only publishes a tag that matches `__version__`: `v1.0.0` for `"1.0.0"`.
 
-The release holds the .exe and its SHA-256 checksum. For a public repository it also gets a signed build provenance, which proves the .exe was built by this workflow from that commit: `gh attestation verify sgdb-covers.exe --repo <owner>/<repo>`. A tag with a hyphen, such as `v1.1.0-rc1`, is marked as a pre-release.
+The release holds the .exe, its SHA-256 checksum and `LICENSES.txt`. That file is written by `tools/licenses.py` from the exact Python and PyInstaller the .exe was built with, and covers everything in the .exe. For a public repository the release also gets a signed build provenance, which proves the .exe was built by this workflow from that commit: `gh attestation verify sgdb-covers.exe --repo <owner>/<repo>`. A tag with a hyphen, such as `v1.1.0-rc1`, is marked as a pre-release.
 
 Dependabot (`.github/dependabot.yml`) keeps the pinned actions and tools up to date with weekly pull requests, which CI tests like any other change.
+
+## License
+
+MIT: see [LICENSE](LICENSE). The .exe also contains the Python runtime, with the libraries Python includes (OpenSSL among them), and PyInstaller's bootloader. They come under their own licenses, all collected in `LICENSES.txt` next to the .exe on each release.

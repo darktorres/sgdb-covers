@@ -18,6 +18,11 @@ if found is None:
 version = found.group(1)
 numbers = (int(found.group(2)), int(found.group(3)), int(found.group(4)), 0)
 VS_FF_PRERELEASE = 0x2
+# The Copyright line under Properties > Details comes from LICENSE.
+license_text = Path(SPECPATH, "LICENSE").read_text(encoding="utf-8")  # noqa: F821
+copyright_line = re.search(r"^Copyright \(c\) \d{4} \S.*$", license_text, re.MULTILINE)
+if copyright_line is None:
+    raise SystemExit('LICENSE needs a "Copyright (c) <year> <name>" line')
 
 version_info = VSVersionInfo(
     ffi=FixedFileInfo(filevers=numbers, prodvers=numbers, flags=VS_FF_PRERELEASE if found.group(5) else 0),
@@ -27,6 +32,7 @@ version_info = VSVersionInfo(
                 StringStruct("FileDescription", "sgdb-covers"),  # also the name Task Manager shows
                 StringStruct("FileVersion", version),
                 StringStruct("InternalName", "sgdb-covers"),
+                StringStruct("LegalCopyright", copyright_line.group(0)),
                 StringStruct("OriginalFilename", "sgdb-covers.exe"),
                 StringStruct("ProductName", "sgdb-covers"),
                 StringStruct("ProductVersion", version),

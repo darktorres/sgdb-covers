@@ -65,6 +65,8 @@ class TestExe(unittest.TestCase):
         self.assertEqual((result.returncode, result.stdout.strip()), (0, f"sgdb-covers {sc.__version__}"))
         for field in ("FileVersion", "ProductVersion"):
             self.assertEqual(version_resource(self.exe, field), sc.__version__)
+        license_text = (Path(__file__).resolve().parent.parent / "LICENSE").read_text(encoding="utf-8")
+        self.assertIn(version_resource(self.exe, "LegalCopyright") + "\n", license_text)
 
     def test_a_run_keeps_its_files_next_to_the_exe(self) -> None:
         steam = self.tmp / "Steam"
